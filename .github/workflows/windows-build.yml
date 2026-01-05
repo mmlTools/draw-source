@@ -1,0 +1,46 @@
+name: Windows Build (main)
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell 7
+        uses: PowerShell/PowerShell@v1
+        with:
+          version: "7.2.0"
+
+      - name: Build (Windows)
+        shell: pwsh
+        env:
+          CI: "true"
+        run: |
+          .github/scripts/Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+
+      - name: Find built DLL
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Path "release/RelWithDebInfo" -Recurse -Filter "*.dll" |
+                 Sort-Object LastWriteTime -Descending |
+                 Select-Object -First 1
+
+          if (-not $dll) { throw "No DLL found under release/RelWithDebInfo" }
+
+          "DLL_PATH=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Found DLL: $($dll.FullName)"
+
+      - name: Upload DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-dll-windows
+          path: ${{ env.DLL_PATH }}
