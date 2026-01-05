@@ -1,46 +1,58 @@
-name: Windows Build (main)
+name: Auto Tag on Main
 
 on:
   push:
     branches: ["main"]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build-windows:
+  auto-tag:
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup PowerShell 7
-        uses: PowerShell/PowerShell@v1
-        with:
-          version: "7.2.0"
-
-      - name: Build (Windows)
-        shell: pwsh
-        env:
-          CI: "true"
-        run: |
-          .github/scripts/Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
-
-      - name: Find built DLL
+      - name: Read version from buildspec.json
         shell: pwsh
         run: |
-          $dll = Get-ChildItem -Path "release/RelWithDebInfo" -Recurse -Filter "*.dll" |
-                 Sort-Object LastWriteTime -Descending |
-                 Select-Object -First 1
+          if (!(Test-Path "buildspec.json")) { throw "buildspec.json not found in repo root." }
+          $spec = Get-Content -Raw "buildspec.json" | ConvertFrom-Json
+          if (-not $spec.version) { throw "buildspec.json must contain 'version'." }
 
-          if (-not $dll) { throw "No DLL found under release/RelWithDebInfo" }
+          $tag = "v$($spec.version)"
+          "TAG_NAME=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Tag to create (if missing): $tag"
 
-          "DLL_PATH=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Found DLL: $($dll.FullName)"
-
-      - name: Upload DLL artifact
-        uses: actions/upload-artifact@v4
+      - name: Create tag if it does not exist
+        uses: actions/github-script@v7
         with:
-          name: plugin-dll-windows
-          path: ${{ env.DLL_PATH }}
+          script: |
+            const tag = process.env.TAG_NAME;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // Check if tag already exists
+            let exists = true;
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+            } catch (e) {
+              exists = false;
+            }
+
+            if (exists) {
+              core.info(`Tag ${tag} already exists. Nothing to do.`);
+              return;
+            }
+
+            // Create lightweight tag ref pointing to the commit that triggered this workflow
+            await github.rest.git.createRef({
+              owner,
+              repo,
+              ref: `refs/tags/${tag}`,
+              sha: context.sha,
+            });
+
+            core.info(`Created tag: ${tag} -> ${context.sha}`);
