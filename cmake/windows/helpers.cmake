@@ -22,12 +22,12 @@ function(set_target_properties_plugin target)
 
   set_target_properties(${target} PROPERTIES VERSION 0 SOVERSION ${PLUGIN_VERSION})
 
-  install(TARGETS ${target} RUNTIME DESTINATION "${target}/bin/64bit" LIBRARY DESTINATION "${target}/bin/64bit")
+  install(TARGETS ${target} RUNTIME DESTINATION "obs-plugins/64bit" LIBRARY DESTINATION "obs-plugins/64bit")
 
   install(
     FILES "$<TARGET_PDB_FILE:${target}>"
     CONFIGURATIONS RelWithDebInfo Debug Release
-    DESTINATION "${target}/bin/64bit"
+    DESTINATION "obs-plugins/64bit"
     OPTIONAL
   )
 
@@ -38,11 +38,11 @@ function(set_target_properties_plugin target)
   add_custom_command(
     TARGET ${target}
     POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/obs-plugins/64bit"
     COMMAND
       "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:${target}>"
       "$<$<CONFIG:Debug,RelWithDebInfo,Release>:$<TARGET_PDB_FILE:${target}>>"
-      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>"
+      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/obs-plugins/64bit"
     COMMENT "Copy ${target} to rundir"
     VERBATIM
   )
@@ -75,15 +75,20 @@ function(target_install_resources target)
       source_group("Resources/${relative_path}" FILES "${data_file}")
     endforeach()
 
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/" DESTINATION "${target}/data" USE_SOURCE_PERMISSIONS)
+    install(
+      DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/"
+      DESTINATION "data/obs-plugins/${target}"
+      USE_SOURCE_PERMISSIONS
+    )
 
     add_custom_command(
       TARGET ${target}
       POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${target}"
+      COMMAND
+        "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/data/obs-plugins/${target}"
       COMMAND
         "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/data"
-        "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${target}"
+        "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/data/obs-plugins/${target}"
       COMMENT "Copy ${target} resources to rundir"
       VERBATIM
     )
@@ -94,13 +99,15 @@ endfunction()
 function(target_add_resource target resource)
   message(DEBUG "Add resource '${resource}' to target ${target} at destination '${target_destination}'...")
 
-  install(FILES "${resource}" DESTINATION "${target}/data" COMPONENT Runtime)
+  install(FILES "${resource}" DESTINATION "data/obs-plugins/${target}" COMPONENT Runtime)
 
   add_custom_command(
     TARGET ${target}
     POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${target}"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${resource}" "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${target}"
+    COMMAND
+      "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/data/obs-plugins/${target}"
+    COMMAND
+      "${CMAKE_COMMAND}" -E copy "${resource}" "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/data/obs-plugins/${target}"
     COMMENT "Copy ${target} resource ${resource} to rundir"
     VERBATIM
   )

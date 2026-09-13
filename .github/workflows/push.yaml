@@ -42,13 +42,14 @@ jobs:
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
           shopt -s extglob
 
+          # Accept an optional "v" or "v." prefix ahead of MAJOR.MINOR.PATCH.
           case "${GITHUB_REF_NAME}" in
-            +([0-9]).+([0-9]).+([0-9]) )
+            @(v.|v|)+([0-9]).+([0-9]).+([0-9]) )
               echo 'validTag=true' >> $GITHUB_OUTPUT
               echo 'prerelease=false' >> $GITHUB_OUTPUT
               echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
               ;;
-            +([0-9]).+([0-9]).+([0-9])-@(beta|rc)*([0-9]) )
+            @(v.|v|)+([0-9]).+([0-9]).+([0-9])-@(beta|rc)*([0-9]) )
               echo 'validTag=true' >> $GITHUB_OUTPUT
               echo 'prerelease=true' >> $GITHUB_OUTPUT
               echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT

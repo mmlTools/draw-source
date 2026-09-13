@@ -21,6 +21,7 @@ void DrawingDocument::resize(QSize size)
 	}
 	size_ = size;
 	dirty_ = true;
+	committedDirty_ = true;
 }
 
 QPointF DrawingDocument::bounded(QPointF point) const
@@ -69,6 +70,7 @@ void DrawingDocument::append(Action action)
 		actions_.pop_front();
 	}
 	dirty_ = true;
+	committedDirty_ = true;
 }
 
 void DrawingDocument::end(uint64_t now)
@@ -100,6 +102,7 @@ void DrawingDocument::undo()
 	if (!actions_.empty()) {
 		redo_.push_back(std::move(actions_.back()));
 		actions_.pop_back();
+		committedDirty_ = true;
 	}
 }
 
@@ -109,6 +112,7 @@ void DrawingDocument::redo()
 	if (!redo_.empty()) {
 		actions_.push_back(std::move(redo_.back()));
 		redo_.pop_back();
+		committedDirty_ = true;
 	}
 }
 
@@ -180,22 +184,44 @@ void DrawingDocument::paint(QImage &image, const Action &a, uint64_t now)
 
 const QImage &DrawingDocument::image(uint64_t now)
 {
-	if (!dirty_ && !fading_)
-		return cache_;
-	cache_ = QImage(size_, QImage::Format_RGBA8888_Premultiplied);
-	cache_.fill(Qt::transparent);
-	if (!base_.isNull()) {
-		QPainter painter(&cache_);
-		painter.drawImage(0, 0, base_);
+	// Rebuilding committed_ replays every non-fading action, so it only
+	// happens when the action list itself changed (append/undo/redo/clear/
+	// resize) — never merely because a stroke is being dragged or a frame
+	// is being rendered, or the cost would grow with total ink drawn.
+	if (committedDirty_) {
+		committed_ = QImage(size_, QImage::Format_RGBA8888_Premultiplied);
+		committed_.fill(Qt::transparent);
+		if (!base_.isNull()) {
+			QPainter painter(&committed_);
+			painter.drawImage(0, 0, base_);
+		}
+		for (const auto &action : actions_)
+			if (!action.fadeMs)
+				paint(committed_, action, now);
+		committedDirty_ = false;
+		dirty_ = true;
 	}
-	fading_ = false;
-	for (const auto &action : actions_) {
-		paint(cache_, action, now);
+
+	bool activeFade = false;
+	for (const auto &action : actions_)
 		if (action.fadeMs && now - std::min(now, action.born) < uint64_t(action.fadeMs) * 1000000)
-			fading_ = true;
-	}
+			activeFade = true;
+
+	// fading_ (previous frame's state) forces one last recompute the instant
+	// a fade finishes, so the now-transparent ink is actually cleared instead
+	// of leaving the last pre-expiry frame cached indefinitely.
+	if (!dirty_ && !activeFade && !fading_ && !drawing_)
+		return cache_;
+
+	// Cheap per-frame composite: start from the baked layer and only paint
+	// the handful of still-fading actions plus the live preview stroke.
+	cache_ = committed_;
+	for (const auto &action : actions_)
+		if (action.fadeMs)
+			paint(cache_, action, now);
 	if (drawing_)
 		paint(cache_, preview_, now);
+	fading_ = activeFade;
 	dirty_ = false;
 	++revision_;
 	return cache_;

@@ -46,12 +46,20 @@ private:
 	QPointF bounded(QPointF point) const;
 	QSize size_{1280, 720};
 	QImage base_;
+	// Baked composite of base_ plus every non-fading action; rebuilding this is
+	// O(action count), so it only happens when the action list actually
+	// changes, not on every mouse-move/render tick while drawing.
+	QImage committed_;
+	bool committedDirty_ = true;
 	QImage cache_;
 	std::deque<Action> actions_;
 	std::deque<Action> redo_;
 	Action preview_;
 	bool drawing_ = false;
 	bool dirty_ = true;
+	// Whether the previous frame had a fading action still animating; used to
+	// force one final recompute the instant a fade finishes, so the expired
+	// ink actually disappears instead of lingering in a stale cached frame.
 	bool fading_ = false;
 	uint64_t revision_ = 0;
 };
