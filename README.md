@@ -126,3 +126,10 @@ Email: contact@obscountdown.com
 ---
 
 Happy streaming — and happy highlighting!
+
+## To build
+cmake -S . -B build_x64 -G "Visual Studio 17 2022" -A x64 `
+  -DENABLE_QT=ON `
+  -DENABLE_FRONTEND_API=ON
+
+cmake --build build_x64 --config RelWithDebInfo --parallel

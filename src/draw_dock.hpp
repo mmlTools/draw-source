@@ -3,6 +3,7 @@
 #ifdef ENABLE_QT
 
 #include <QWidget>
+#include <cstdint>
 
 class QComboBox;
 class QSlider;
@@ -16,54 +17,63 @@ typedef struct obs_source obs_source_t;
 
 namespace drawsrc {
 
-class DrawDock : public QWidget {
-  Q_OBJECT
-public:
-  explicit DrawDock(QWidget *parent = nullptr);
-  ~DrawDock() override;
+class PreviewOverlay;
 
-  // Refresh list of draw sources.
-  void refreshSources();
+class DrawDock : public QWidget {
+	Q_OBJECT
+public:
+	explicit DrawDock(QWidget *parent = nullptr);
+	~DrawDock() override;
+
+	// Refresh list of draw sources.
+	void refreshSources();
 
 private slots:
-  void onSourceChanged(int idx);
-  void onToolChanged(int idx);
-  void onThicknessChanged(int v);
-  void onOpacityChanged(int v);
-  void onReleaseModeChanged(int idx);
-  void onFadeMsChanged(int v);
-  void onPickColor();
-  void onUndo();
-  void onClear();
-  void onOpenInteract();
+	void onSourceChanged(int idx);
+	void onToolChanged(int idx);
+	void onThicknessChanged(int v);
+	void onOpacityChanged(int v);
+	void onReleaseModeChanged(int idx);
+	void onFadeMsChanged(int v);
+	void onPickColor();
+	void onUndo();
+	void onRedo();
+	void onClear();
+	void onOpenInteract();
+	void onCreateCanvas();
 
 private:
-  void setUiEnabled(bool en);
-  void loadFromSource(obs_source_t *src);
-  void applyToSource();
-  obs_source_t *currentSource() const;
+	void setUiEnabled(bool en);
+	void loadFromSource(obs_source_t *src);
+	void applyToSource();
+	obs_source_t *currentSource() const;
 
 private:
-  QComboBox *sourceBox_ = nullptr;
-  QComboBox *toolBox_ = nullptr;
-  QComboBox *releaseBox_ = nullptr;
-  QSpinBox  *fadeMs_ = nullptr;
-  QSlider *thickness_ = nullptr;
-  QLabel *thicknessVal_ = nullptr;
-  QSlider *opacity_ = nullptr;
-  QLabel *opacityVal_ = nullptr;
-  QPushButton *colorBtn_ = nullptr;
-  QLabel *colorSwatch_ = nullptr;
-  QPushButton *interactBtn_ = nullptr;
-  QPushButton *undoBtn_ = nullptr;
-  QPushButton *clearBtn_ = nullptr;
-  QTimer *refreshTimer_ = nullptr;
+	QComboBox *sourceBox_ = nullptr;
+	QComboBox *toolBox_ = nullptr;
+	QComboBox *releaseBox_ = nullptr;
+	QSpinBox *fadeMs_ = nullptr;
+	QSpinBox *eraserSize_ = nullptr;
+	QSlider *thickness_ = nullptr;
+	QLabel *thicknessVal_ = nullptr;
+	QSlider *opacity_ = nullptr;
+	QLabel *opacityVal_ = nullptr;
+	QPushButton *colorBtn_ = nullptr;
+	QLabel *colorSwatch_ = nullptr;
+	QPushButton *interactBtn_ = nullptr;
+	QPushButton *undoBtn_ = nullptr;
+	QPushButton *redoBtn_ = nullptr;
+	QPushButton *drawBtn_ = nullptr;
+	QLabel *status_ = nullptr;
+	PreviewOverlay *overlay_ = nullptr;
+	QPushButton *clearBtn_ = nullptr;
+	QTimer *refreshTimer_ = nullptr;
 
-  bool lock_ = false;
-  uint32_t colorArgb_ = 0xFFFFFFFFu;
-  int opacityPct_ = 100;
-  int releaseMode_ = 0;
-  int fadeMsVal_ = 450;
+	bool lock_ = false;
+	uint32_t colorArgb_ = 0xFFFFFFFFu;
+	int opacityPct_ = 100;
+	int releaseMode_ = 0;
+	int fadeMsVal_ = 450;
 };
 
 } // namespace drawsrc
