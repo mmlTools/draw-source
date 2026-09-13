@@ -1,135 +1,104 @@
 # Instant Highlight Source Draw
 
-**Instant Highlight Source Draw** is a fast, intuitive OBS Studio plugin that lets you draw directly on a source in real time to highlight important elements during your livestream or recording.
+An OBS Studio plugin for drawing directly on a scene in real time: freehand
+ink, basic shapes, and a true pixel eraser, controlled from a dedicated dock
+or by drawing straight onto the OBS preview.
 
-Draw shapes such as **squares, circles, arrows, and hearts**, or erase parts of the drawing instantly — all from a dedicated dock designed for speed and ease of use.
+## Features
 
----
+- Freehand pen, plus Square, Circle, Arrow, and Heart shape tools
+- Pixel-level eraser that removes ink along the stroke you draw, not whole
+  shapes at once
+- Adjustable line thickness (1–64 px) and eraser size (4–256 px)
+- Color picker with independent opacity control
+- Two release behaviors: keep ink until cleared, or fade it out over a
+  configurable duration after you release the pointer
+- Multi-level undo and redo
+- Draw directly on the OBS preview — mouse, tablet, and touch input — without
+  opening the source's Interact window
+- "Add canvas" creates a full-scene drawing layer, sized to the program
+  output and locked in place, in one click
+- Optional mirror source: draw over another source, with the canvas
+  auto-sized to match it
+- Dock layout and visibility persist across OBS restarts
 
-## ✨ Features
+## How it works
 
-- 🖊️ **Real-time drawing on a source**
-- 🔲 **Multiple tools**: Square, Circle, Arrow, Heart, Eraser
-- 🎯 **Instant visual highlighting** for tutorials, presentations, and live commentary
-- 🎨 **Color picker with opacity control**
-- 📏 **Adjustable thickness (1–8)**
-- ⏱️ **Release behavior modes**
-  - **Keep until cleared** – drawings persist indefinitely
-  - **Fade after release** – drawings fade out after a configurable time
-- ↩️ **Undo** last action
-- 🧹 **Clear** all drawings instantly
-- 🪟 **Dedicated OBS dock** with persistent layout (restored on restart)
-- 🖱️ **Source Interaction support** (draw directly via the Interact window)
+The plugin registers a Draw Source. All drawing state — ink, undo history,
+and tool settings — lives inside that source, so scenes stay simple: no
+browser source, external overlay, or extra compositing step is required.
 
----
+The Draw Tools dock selects the active Draw Source, exposes its tool,
+color, thickness, opacity, and release-mode settings, and provides
+undo/redo/clear. Its "Draw on preview" button lets you draw directly on the
+OBS preview without switching to the Interact window; Ctrl+Z / Ctrl+Y and
+Esc work while it's active.
 
-## 🧠 How It Works
+## Installation
 
-The plugin adds a new **Draw Source** to OBS.  
-All drawing happens inside the source’s interaction layer, ensuring:
+1. Download the archive for your platform from the [Releases page](https://github.com/mmlTools/draw-source/releases)
+   or from https://obscountdown.com.
+2. Extract it into your OBS Studio plugins directory:
+   - Windows: `%ProgramFiles%\obs-studio\obs-plugins\`
+   - macOS: `~/Library/Application Support/obs-studio/plugins/`
+   - Linux: installed automatically by the `.deb` package, or extract the
+     `.tar.xz` into `~/.config/obs-studio/plugins/`
+3. Restart OBS Studio.
 
-- Zero impact on scene structure
-- No external browser sources or overlays required
-- Clean separation between visuals and control logic
+## Getting started
 
-The **Draw Tools Dock** allows you to:
+1. Add a Draw Source to a scene, or click **Add canvas** in the Draw Tools
+   dock to create one automatically.
+2. Open **View → Docks → Draw Tools**.
+3. Select the source, choose a tool, color, and thickness, then either open
+   **Interact** or click **Draw on preview**.
+4. Draw. Use **Undo**, **Redo**, or **Clear** from the dock as needed.
 
-- Select the active Draw Source
-- Change tools, colors, opacity, thickness
-- Control release behavior
-- Open the source interaction window
-- Undo or clear drawings instantly
+## Release behavior
 
----
+- **Keep until cleared** — ink persists until cleared manually or removed
+  with the eraser.
+- **Fade after release** — ink fades out automatically over a configurable
+  duration after the pointer is released.
 
-## 🧩 Installation
+## Compatibility
 
-1. Download the plugin from the official page:
-   👉 https://obscountdown.com
-2. Extract the archive into your OBS plugins directory:
-   - **Windows**:  
-     `C:\Program Files\obs-studio\obs-plugins\`
-3. Restart OBS Studio
+- OBS Studio 31 or later (uses the dock-by-id frontend API)
+- Windows x64, Linux x86_64, and macOS (Intel and Apple Silicon)
+- Requires the OBS Frontend API and Qt6, both included in standard OBS
+  Studio builds
 
----
+## Building from source
 
-## 🚀 Getting Started
+Requires CMake 3.28+. `CMakePresets.json` defines a preset per platform;
+Windows and macOS fetch their OBS/Qt6 build dependencies automatically via
+`buildspec.json`, while Linux expects a system-installed OBS SDK and Qt6
+(see `.github/scripts/utils.zsh/setup_ubuntu` for the exact packages CI
+installs).
 
-1. Add a **Draw Source** to your scene
-2. Open **View → Docks → Draw Tools**
-3. Select your Draw Source from the **Target** dropdown
-4. Click **Interact**
-5. Start drawing directly on the source
+```sh
+# Windows (Visual Studio 2022)
+cmake --preset windows-x64
+cmake --build --preset windows-x64
 
-Your drawings will appear instantly in the scene.
+# Linux
+cmake --preset ubuntu-x86_64
+cmake --build --preset ubuntu-x86_64
 
----
+# macOS
+cmake --preset macos
+cmake --build --preset macos
+```
 
-## ⚙️ Release Modes Explained
+Pass `-DBUILD_TESTING=ON` to also configure the `tests` target, which
+exercises the drawing engine (`drawing_document.cpp`) independent of OBS.
 
-### Keep until cleared
+## License
 
-- Drawings remain visible indefinitely
-- Perfect for explanations and step-by-step walkthroughs
-- Clear manually or use the Eraser tool
+MIT — see [LICENSE](LICENSE).
 
-### Fade after release
+## Author
 
-- Drawings fade out automatically after mouse release
-- Fade duration is configurable (milliseconds)
-- Ideal for quick highlights during live action
-
----
-
-## 🎥 Use Cases
-
-- Live tutorials and OBS demonstrations
-- Game streaming with visual callouts
-- Educational streams and online classes
-- Presentations and screen sharing
-- VOD annotations and quick emphasis
-
----
-
-## 🧪 Compatibility
-
-- OBS Studio **28+**
-- Windows (64-bit)
-- Requires **Frontend API** and **Qt** (standard OBS builds)
-
----
-
-## 📌 Notes
-
-- The dock layout and visibility are automatically restored on OBS restart
-- The dock ID is stable to ensure persistent UI state
-- No external dependencies or browser sources required
-
----
-
-## ❤️ Support & Feedback
-
-If you find this plugin useful:
-
-- Share it with other streamers
-- Report issues or suggestions
-- Support development at **https://obscountdown.com**
-
----
-
-## 🧑‍💻 Author
-
-**MMLTech**  
-Website: https://obscountdown.com  
+MML Tech
+Website: https://obscountdown.com
 Email: contact@obscountdown.com
-
----
-
-Happy streaming — and happy highlighting!
-
-## To build
-cmake -S . -B build_x64 -G "Visual Studio 17 2022" -A x64 `
-  -DENABLE_QT=ON `
-  -DENABLE_FRONTEND_API=ON
-
-cmake --build build_x64 --config RelWithDebInfo --parallel
