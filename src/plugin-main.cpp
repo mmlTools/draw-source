@@ -31,7 +31,7 @@ MODULE_EXPORT const char *obs_module_name(void)
 
 MODULE_EXPORT const char *obs_module_description(void)
 {
-	return "Instant highlight drawing source (Square/Circle/Arrow/Heart/Eraser) with an interaction dock.";
+	return "Smart screen with freehand ink, partial erasing, and drawing directly on the OBS preview.";
 }
 
 bool obs_module_load(void)

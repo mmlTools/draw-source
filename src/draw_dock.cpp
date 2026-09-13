@@ -4,6 +4,7 @@
 
 #include "draw_dock.hpp"
 #include "draw_source.hpp"
+#include "preview_overlay.hpp"
 
 #include <obs.h>
 #ifdef ENABLE_FRONTEND_API
@@ -22,6 +23,9 @@
 #include <QColorDialog>
 #include <QFrame>
 #include <QDockWidget>
+#include <QSignalBlocker>
+#include <QStyle>
+#include <QPointer>
 
 #include <cstring>
 #include <algorithm>
@@ -49,6 +53,20 @@ DrawDock::DrawDock(QWidget *parent) : QWidget(parent)
 	auto *root = new QVBoxLayout();
 	root->setContentsMargins(10, 10, 10, 10);
 	root->setSpacing(8);
+	overlay_ = new PreviewOverlay(this);
+	drawBtn_ = new QPushButton(tr("Draw on preview"));
+	drawBtn_->setCheckable(true);
+	connect(drawBtn_, &QPushButton::toggled, this, [this](bool enabled) {
+		if (!overlay_->setEnabled(enabled)) {
+			QSignalBlocker blocker(drawBtn_);
+			drawBtn_->setChecked(false);
+		}
+	});
+	connect(overlay_, &PreviewOverlay::stopped, this, [this]() {
+		QSignalBlocker blocker(drawBtn_);
+		drawBtn_->setChecked(false);
+		status_->setText(tr("Drawing off"));
+	});
 
 	// Header row
 	{
@@ -66,6 +84,15 @@ DrawDock::DrawDock(QWidget *parent) : QWidget(parent)
 		row->addWidget(interactBtn_);
 		root->addLayout(row);
 	}
+	{
+		auto *row = new QHBoxLayout();
+		auto *create = new QPushButton(tr("Add canvas"));
+		create->setIcon(style()->standardIcon(QStyle::SP_FileIcon));
+		connect(create, &QPushButton::clicked, this, &DrawDock::onCreateCanvas);
+		row->addWidget(create);
+		row->addWidget(drawBtn_);
+		root->addLayout(row);
+	}
 
 	// Source selector
 	{
@@ -80,6 +107,7 @@ DrawDock::DrawDock(QWidget *parent) : QWidget(parent)
 		form->addRow(tr("Target"), sourceBox_);
 
 		toolBox_ = new QComboBox();
+		toolBox_->addItem(tr("Pen"), (int)Tool::Pen);
 		toolBox_->addItem(tr("Square"), (int)Tool::Square);
 		toolBox_->addItem(tr("Circle"), (int)Tool::Circle);
 		toolBox_->addItem(tr("Arrow"), (int)Tool::Arrow);
@@ -159,7 +187,7 @@ DrawDock::DrawDock(QWidget *parent) : QWidget(parent)
 			form->addRow(tr("Opacity"), wrap);
 		}
 
-		// Thickness 1-8
+		// Thickness in source pixels.
 		{
 			auto *wrap = new QWidget();
 			auto *h = new QHBoxLayout();
@@ -167,7 +195,7 @@ DrawDock::DrawDock(QWidget *parent) : QWidget(parent)
 			h->setSpacing(8);
 
 			thickness_ = new QSlider(Qt::Horizontal);
-			thickness_->setRange(1, 8);
+			thickness_->setRange(1, 64);
 			thickness_->setValue(3);
 			connect(thickness_, &QSlider::valueChanged, this, &DrawDock::onThicknessChanged);
 
@@ -181,6 +209,12 @@ DrawDock::DrawDock(QWidget *parent) : QWidget(parent)
 
 			form->addRow(tr("Thickness"), wrap);
 		}
+		eraserSize_ = new QSpinBox();
+		eraserSize_->setRange(4, 256);
+		eraserSize_->setSuffix(tr(" px"));
+		connect(eraserSize_, QOverload<int>::of(&QSpinBox::valueChanged), this,
+			[this](int) { applyToSource(); });
+		form->addRow(tr("Eraser size"), eraserSize_);
 
 		root->addLayout(form);
 	}
@@ -189,15 +223,26 @@ DrawDock::DrawDock(QWidget *parent) : QWidget(parent)
 	{
 		auto *row = new QHBoxLayout();
 		undoBtn_ = new QPushButton(tr("Undo"));
+		undoBtn_->setIcon(style()->standardIcon(QStyle::SP_ArrowBack));
+		redoBtn_ = new QPushButton(tr("Redo"));
+		redoBtn_->setIcon(style()->standardIcon(QStyle::SP_ArrowForward));
 		clearBtn_ = new QPushButton(tr("Clear"));
+		clearBtn_->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
 		connect(undoBtn_, &QPushButton::clicked, this, &DrawDock::onUndo);
+		connect(redoBtn_, &QPushButton::clicked, this, &DrawDock::onRedo);
 		connect(clearBtn_, &QPushButton::clicked, this, &DrawDock::onClear);
 		row->addWidget(undoBtn_);
+		row->addWidget(redoBtn_);
 		row->addWidget(clearBtn_);
 		row->addStretch(1);
 		root->addLayout(row);
 	}
 
+	status_ = new QLabel(tr("Drawing off"));
+	status_->setWordWrap(true);
+	connect(overlay_, &PreviewOverlay::statusChanged, status_, &QLabel::setText);
+	root->addWidget(status_);
+	root->addStretch(1);
 	setLayout(root);
 
 	refreshTimer_ = new QTimer(this);
@@ -208,7 +253,12 @@ DrawDock::DrawDock(QWidget *parent) : QWidget(parent)
 	refreshSources();
 }
 
-DrawDock::~DrawDock() = default;
+DrawDock::~DrawDock()
+{
+	delete overlay_;
+	for (int i = 0; i < sourceBox_->count(); ++i)
+		obs_source_release(reinterpret_cast<obs_source_t *>(sourceBox_->itemData(i).value<quintptr>()));
+}
 
 void DrawDock::setUiEnabled(bool en)
 {
@@ -222,6 +272,9 @@ void DrawDock::setUiEnabled(bool en)
 	colorBtn_->setEnabled(en);
 	interactBtn_->setEnabled(en);
 	undoBtn_->setEnabled(en);
+	redoBtn_->setEnabled(en);
+	drawBtn_->setEnabled(en);
+	eraserSize_->setEnabled(en);
 	clearBtn_->setEnabled(en);
 }
 
@@ -235,6 +288,7 @@ obs_source_t *DrawDock::currentSource() const
 void DrawDock::refreshSources()
 {
 	lock_ = true;
+	obs_source_t *prev = obs_source_get_ref(currentSource());
 
 	for (int i = 0; i < sourceBox_->count(); ++i) {
 		const quintptr ptr = sourceBox_->itemData(i).value<quintptr>();
@@ -242,7 +296,6 @@ void DrawDock::refreshSources()
 			obs_source_release(reinterpret_cast<obs_source_t *>(ptr));
 	}
 
-	obs_source_t *prev = currentSource();
 	sourceBox_->clear();
 
 	std::vector<obs_source_t *> refs;
@@ -269,6 +322,8 @@ void DrawDock::refreshSources()
 
 	if (idxToSelect >= 0)
 		sourceBox_->setCurrentIndex(idxToSelect);
+	obs_source_release(prev);
+	overlay_->setSource(currentSource());
 
 	if (sourceBox_->count() == 0) {
 		setUiEnabled(false);
@@ -294,6 +349,7 @@ void DrawDock::loadFromSource(obs_source_t *src)
 	const uint32_t col = (uint32_t)obs_data_get_int(settings, kColor);
 	const int relMode = (int)obs_data_get_int(settings, kReleaseMode);
 	const int fadeMs = (int)obs_data_get_int(settings, kFadeMs);
+	const int eraserSize = (int)obs_data_get_int(settings, "eraser_size");
 	obs_data_release(settings);
 
 	int toolIdx = toolBox_->findData(toolVal);
@@ -301,7 +357,8 @@ void DrawDock::loadFromSource(obs_source_t *src)
 		toolIdx = 0;
 	toolBox_->setCurrentIndex(toolIdx);
 
-	thickness_->setValue(std::max(1, std::min(8, thick)));
+	thickness_->setValue(std::clamp(thick, 1, 64));
+	eraserSize_->setValue(std::clamp(eraserSize, 4, 256));
 	opacity_->setValue(std::max(0, std::min(100, opacity)));
 
 	colorArgb_ = col;
@@ -344,6 +401,7 @@ void DrawDock::applyToSource()
 	obs_data_t *s = obs_source_get_settings(src);
 	obs_data_set_int(s, kTool, toolBox_->currentData().toInt());
 	obs_data_set_int(s, kThick, thickness_->value());
+	obs_data_set_int(s, "eraser_size", eraserSize_->value());
 	obs_data_set_int(s, kColor, (int64_t)colorArgb_);
 	obs_data_set_int(s, kOpacity, opacity_->value());
 	if (releaseBox_)
@@ -358,6 +416,7 @@ void DrawDock::onSourceChanged(int)
 {
 	if (lock_)
 		return;
+	overlay_->setSource(currentSource());
 	loadFromSource(currentSource());
 }
 
@@ -401,7 +460,7 @@ void DrawDock::onPickColor()
 	init.setGreen((colorArgb_ >> 8) & 0xFF);
 	init.setBlue((colorArgb_ >> 0) & 0xFF);
 
-	QColor chosen = QColorDialog::getColor(init, this, tr("Pick Draw Color"), QColorDialog::ShowAlphaChannel);
+	QColor chosen = QColorDialog::getColor(init, this, tr("Pick Draw Color"));
 	if (!chosen.isValid())
 		return;
 
@@ -439,6 +498,50 @@ void DrawDock::onClear()
 	obs_data_release(s);
 }
 
+void DrawDock::onRedo()
+{
+	obs_source_t *src = currentSource();
+	if (!src)
+		return;
+	obs_data_t *settings = obs_source_get_settings(src);
+	obs_data_set_bool(settings, "_do_redo", true);
+	obs_source_update(src, settings);
+	obs_data_release(settings);
+}
+
+void DrawDock::onCreateCanvas()
+{
+	obs_source_t *sceneSource = obs_frontend_preview_program_mode_active()
+					    ? obs_frontend_get_current_preview_scene()
+					    : obs_frontend_get_current_scene();
+	obs_scene_t *scene = obs_scene_from_source(sceneSource);
+	if (!scene) {
+		obs_source_release(sceneSource);
+		return;
+	}
+	QString name = tr("Smart Screen");
+	for (int suffix = 2;; ++suffix) {
+		obs_source_t *existing = obs_get_source_by_name(name.toUtf8().constData());
+		if (!existing)
+			break;
+		obs_source_release(existing);
+		name = tr("Smart Screen %1").arg(suffix);
+	}
+	obs_source_t *source = obs_source_create(kSourceId, name.toUtf8().constData(), nullptr, nullptr);
+	if (source) {
+		if (auto *item = obs_scene_add(scene, source)) {
+			obs_sceneitem_set_order(item, OBS_ORDER_MOVE_TOP);
+			obs_sceneitem_set_locked(item, true);
+		}
+		refreshSources();
+		for (int i = 0; i < sourceBox_->count(); ++i)
+			if (sourceBox_->itemData(i).value<quintptr>() == reinterpret_cast<quintptr>(source))
+				sourceBox_->setCurrentIndex(i);
+		obs_source_release(source);
+	}
+	obs_source_release(sceneSource);
+}
+
 void DrawDock::onOpenInteract()
 {
 #ifdef ENABLE_FRONTEND_API
@@ -455,7 +558,7 @@ void DrawDock::onOpenInteract()
 // Dock lifecycle (Smart Lower Thirds style)
 // -----------------------------------------------------------------------------
 
-static QWidget *g_dockWidget = nullptr;
+static QPointer<QWidget> g_dockWidget;
 
 // Use a stable ID/title (these must never change between versions)
 static constexpr const char *kDockId = "draw_tools_dock";
@@ -473,7 +576,10 @@ void Draw_create_dock()
 	panel->setObjectName(QStringLiteral("DrawToolsDockPanel"));
 
 	// Prefer by-id API (non-deprecated, persistent)
-	obs_frontend_add_dock_by_id(kDockId, kDockTitle, panel);
+	if (!obs_frontend_add_dock_by_id(kDockId, kDockTitle, panel)) {
+		delete panel;
+		return;
+	}
 
 	g_dockWidget = panel;
 	blog(LOG_INFO, "[%s][dock] Dock created (id=%s)", PLUGIN_NAME, kDockId);
@@ -496,7 +602,7 @@ void Draw_destroy_dock()
 
 drawsrc::DrawDock *Draw_get_dock()
 {
-	return qobject_cast<drawsrc::DrawDock *>(g_dockWidget);
+	return qobject_cast<drawsrc::DrawDock *>(g_dockWidget.data());
 }
 
 #endif // ENABLE_QT
