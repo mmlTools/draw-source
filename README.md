@@ -37,7 +37,7 @@ Esc work while it's active.
 ## Installation
 
 1. Download the archive for your platform from the [Releases page](https://github.com/mmlTools/draw-source/releases)
-   or from https://obscountdown.com.
+   or from https://streamrsc.com.
 2. Extract it into your OBS Studio plugins directory:
    - Windows: `%ProgramFiles%\obs-studio\obs-plugins\`
    - macOS: `~/Library/Application Support/obs-studio/plugins/`
@@ -100,5 +100,5 @@ MIT — see [LICENSE](LICENSE).
 ## Author
 
 MML Tech
-Website: https://obscountdown.com
-Email: contact@obscountdown.com
+Website: https://streamrsc.com
+Email: contact@streamrsc.com
