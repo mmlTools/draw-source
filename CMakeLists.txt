@@ -50,7 +50,7 @@ add_compile_definitions(HAVE_OBS_DOCK_BY_ID=1)
 # ---------------------------------------------------------------------------
 add_library(${CMAKE_PROJECT_NAME} MODULE)
 
-find_package(libobs 31.1 REQUIRED)
+find_package(libobs REQUIRED)
 find_package(obs-frontend-api REQUIRED)
 
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets)
