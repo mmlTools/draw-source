@@ -13,6 +13,10 @@
 #include <obs-frontend-api.h>
 #endif
 
+// obs_source is an opaque C struct; Qt's connect() must not try to inspect it
+// when a signal carries a pointer to it (GCC/Clang reject sizeof otherwise).
+Q_DECLARE_OPAQUE_POINTER(obs_source_t *)
+
 class QAction;
 class QButtonGroup;
 class QComboBox;

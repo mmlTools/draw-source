@@ -26,6 +26,13 @@ set(CMAKE_XCODE_ATTRIBUTE_MARKETING_VERSION ${PLUGIN_VERSION})
 # Set deployment target
 set(CMAKE_XCODE_ATTRIBUTE_MACOSX_DEPLOYMENT_TARGET ${CMAKE_OSX_DEPLOYMENT_TARGET})
 
+# Do not let AUTOMOC probe the compiler for predefined macros. Xcode runs that
+# probe inside a script phase that exports *_DEPLOYMENT_TARGET for every Apple
+# platform, and the clang shipped with Xcode 26.5 aborts with "conflicting
+# deployment targets" when more than one is set. Every macro moc needs here is a
+# target compile definition, which AUTOMOC passes on regardless.
+set(CMAKE_AUTOMOC_COMPILER_PREDEFINES OFF)
+
 if(NOT CODESIGN_TEAM)
   # Switch to manual codesigning if no codesigning team is provided
   set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_STYLE Manual)
