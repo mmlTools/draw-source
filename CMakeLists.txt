@@ -42,9 +42,6 @@ include(helpers)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# OBS 31/32+: dock-by-id API (preferred)
-add_compile_definitions(HAVE_OBS_DOCK_BY_ID=1)
-
 # ---------------------------------------------------------------------------
 # Target (OBS plugin)
 # ---------------------------------------------------------------------------
@@ -76,6 +73,10 @@ target_sources(
     src/draw_source.hpp
     src/draw_dock.cpp
     src/draw_dock.hpp
+    src/draw_icons.cpp
+    src/draw_icons.hpp
+    src/draw_window.cpp
+    src/draw_window.hpp
     src/drawing_document.cpp
     src/drawing_document.hpp
     src/preview_overlay.cpp

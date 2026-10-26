@@ -7,6 +7,9 @@
 
 namespace drawsrc {
 
+// Source type id; persisted in scene collections, never change it.
+constexpr const char *kDrawSourceId = "instant_highlight_source_draw";
+
 class DrawSource {
 public:
 	explicit DrawSource(obs_data_t *settings, obs_source_t *source);
@@ -20,6 +23,7 @@ public:
 	void focus(bool focus);
 
 private:
+	static void draw_eraser_ring(QPointF center, float radius);
 	obs_source_t *source_;
 	std::mutex mutex_;
 	DrawingDocument document_;
@@ -30,6 +34,15 @@ private:
 	qreal eraserSize_ = 32;
 	QColor color_{Qt::red};
 	uint32_t fadeMs_ = 0;
+	// Pointer state from the Interact window (or the preview overlay) used to
+	// show the eraser footprint while hovering.
+	bool hovering_ = false;
+	bool strokeActive_ = false;
+	bool strokeEraser_ = false;
+	QPointF hover_;
+	// Overlays draw their own cursor ring, so each active one asks the source
+	// to keep the ring out of the program output (counted, several may run).
+	std::atomic<int> ringHidden_{0};
 	obs_source_t *mirror_ = nullptr;
 	gs_texture_t *texture_ = nullptr;
 	uint64_t uploadedRevision_ = 0;

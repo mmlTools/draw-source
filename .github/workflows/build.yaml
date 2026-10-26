@@ -1,0 +1,35 @@
+name: Build
+run-name: Manual build (${{ inputs.config }}) 🧱
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: Build configuration
+        required: true
+        type: choice
+        default: Release
+        options:
+          - Release
+          - RelWithDebInfo
+      package:
+        description: Create installer packages (macOS .pkg, Ubuntu .deb) in addition to archives
+        required: false
+        type: boolean
+        default: true
+      notarize:
+        description: Notarize the macOS package (requires the MACOS_NOTARIZATION_* secrets)
+        required: false
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build Project 🧱
+    uses: ./.github/workflows/build-project.yaml
+    secrets: inherit
+    with:
+      config: ${{ inputs.config }}
+      package: ${{ inputs.package }}
+      codesign: true
+      notarize: ${{ inputs.notarize }}

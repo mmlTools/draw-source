@@ -7,10 +7,26 @@
 
 namespace drawsrc {
 
-static constexpr const char *kSourceId = "instant_highlight_source_draw";
+namespace {
+
+constexpr qreal kPi = 3.14159265358979323846;
+
+} // namespace
 
 DrawSource::DrawSource(obs_data_t *settings, obs_source_t *source) : source_(source)
 {
+	// The dock's preview overlay calls this to keep the eraser ring out of the
+	// program output while it shows its own cursor ring on the preview.
+	proc_handler_add(
+		obs_source_get_proc_handler(source_), "void set_eraser_ring_hidden(bool hidden)",
+		[](void *data, calldata_t *cd) {
+			auto *self = static_cast<DrawSource *>(data);
+			if (calldata_bool(cd, "hidden"))
+				++self->ringHidden_;
+			else if (self->ringHidden_ > 0)
+				--self->ringHidden_;
+		},
+		this);
 	update(settings);
 }
 
@@ -45,7 +61,8 @@ void DrawSource::update(obs_data_t *settings)
 			mirror_ = nullptr;
 		}
 		// OBS validates the active-child graph, including indirect scene cycles.
-		if (candidate && candidate != source_ && std::strcmp(obs_source_get_id(candidate), kSourceId) != 0 &&
+		if (candidate && candidate != source_ &&
+		    std::strcmp(obs_source_get_id(candidate), kDrawSourceId) != 0 &&
 		    obs_source_add_active_child(source_, candidate))
 			mirror_ = obs_source_get_ref(candidate);
 	}
@@ -68,7 +85,7 @@ void DrawSource::update(obs_data_t *settings)
 	width_ = uint32_t(w);
 	height_ = uint32_t(h);
 	document_.resize({w, h});
-	tool_ = Tool(std::clamp(int(obs_data_get_int(settings, "tool")), 0, int(Tool::Pen)));
+	tool_ = Tool(std::clamp(int(obs_data_get_int(settings, "tool")), 0, kToolMax));
 	thickness_ = std::clamp(obs_data_get_double(settings, "thickness"), 1.0, 64.0);
 	eraserSize_ = std::clamp(obs_data_get_double(settings, "eraser_size"), 4.0, 256.0);
 	const auto rgba = uint32_t(obs_data_get_int(settings, "color"));
@@ -87,11 +104,16 @@ void DrawSource::mouse_click(const obs_mouse_event *event, int32_t type, bool mo
 		return;
 	std::lock_guard<std::mutex> lock(mutex_);
 	const QPointF point(event->x, event->y);
+	hover_ = point;
+	hovering_ = true;
 	if (mouse_up) {
 		document_.move(point);
 		document_.end(os_gettime_ns());
+		strokeActive_ = false;
 	} else {
 		const Tool tool = type == MOUSE_RIGHT ? Tool::Eraser : tool_;
+		strokeActive_ = true;
+		strokeEraser_ = tool == Tool::Eraser;
 		document_.begin(point, tool, tool == Tool::Eraser ? eraserSize_ : thickness_, color_, fadeMs_);
 	}
 }
@@ -99,18 +121,48 @@ void DrawSource::mouse_click(const obs_mouse_event *event, int32_t type, bool mo
 void DrawSource::mouse_move(const obs_mouse_event *event, bool mouse_leave)
 {
 	std::lock_guard<std::mutex> lock(mutex_);
-	if (mouse_leave)
+	if (mouse_leave) {
+		hovering_ = false;
+		strokeActive_ = false;
 		document_.end(os_gettime_ns());
-	else if (event)
-		document_.move({double(event->x), double(event->y)});
+	} else if (event) {
+		hover_ = QPointF(event->x, event->y);
+		hovering_ = true;
+		document_.move(hover_);
+	}
 }
 
 void DrawSource::focus(bool focused)
 {
 	if (!focused) {
 		std::lock_guard<std::mutex> lock(mutex_);
+		strokeActive_ = false;
+		hovering_ = false;
 		document_.end(os_gettime_ns());
 	}
+}
+
+void DrawSource::draw_eraser_ring(QPointF center, float radius)
+{
+	gs_effect_t *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
+	gs_eparam_t *color = gs_effect_get_param_by_name(solid, "color");
+	gs_technique_t *tech = gs_effect_get_technique(solid, "Solid");
+	constexpr int segments = 64;
+	gs_technique_begin(tech);
+	gs_technique_begin_pass(tech, 0);
+	// A dark halo under a light ring keeps the footprint readable on any backdrop.
+	for (int pass = 0; pass < 2; ++pass) {
+		const float r = pass ? radius : radius + 1.0f;
+		gs_effect_set_color(color, pass ? 0xffffffffu : 0x90000000u);
+		gs_render_start(false);
+		for (int i = 0; i <= segments; ++i) {
+			const float angle = float(2.0 * kPi * i / segments);
+			gs_vertex2f(float(center.x()) + std::cos(angle) * r, float(center.y()) + std::sin(angle) * r);
+		}
+		gs_render_stop(GS_LINESTRIP);
+	}
+	gs_technique_end_pass(tech);
+	gs_technique_end(tech);
 }
 
 void DrawSource::render()
@@ -119,11 +171,17 @@ void DrawSource::render()
 	obs_source_t *mirror;
 	QImage image;
 	uint64_t revision;
+	bool ring;
+	QPointF ringCenter;
+	float ringRadius;
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		mirror = obs_source_get_ref(mirror_);
 		image = document_.image(os_gettime_ns());
 		revision = document_.revision();
+		ring = hovering_ && ringHidden_.load() <= 0 && (strokeActive_ ? strokeEraser_ : tool_ == Tool::Eraser);
+		ringCenter = hover_;
+		ringRadius = float(eraserSize_) / 2.0f;
 	}
 	if (mirror) {
 		const uint32_t w = obs_source_get_width(mirror);
@@ -161,6 +219,8 @@ void DrawSource::render()
 	while (gs_effect_loop(effect, "Draw"))
 		gs_draw_sprite(texture_, 0, uint32_t(image.width()), uint32_t(image.height()));
 	gs_blend_state_pop();
+	if (ring)
+		draw_eraser_ring(ringCenter, ringRadius);
 }
 
 static void draw_defaults(obs_data_t *settings)
@@ -189,7 +249,7 @@ static obs_properties_t *draw_properties(void *)
 	obs_enum_sources(
 		[](void *data, obs_source_t *source) {
 			if ((obs_source_get_output_flags(source) & OBS_SOURCE_VIDEO) &&
-			    std::strcmp(obs_source_get_id(source), kSourceId) != 0) {
+			    std::strcmp(obs_source_get_id(source), kDrawSourceId) != 0) {
 				const char *name = obs_source_get_name(source);
 				obs_property_list_add_string(static_cast<obs_property_t *>(data), name, name);
 			}
@@ -206,11 +266,12 @@ const obs_source_info *draw_source_get_info()
 {
 	static const obs_source_info info = [] {
 		obs_source_info result{};
-		result.id = kSourceId;
+		result.id = kDrawSourceId;
 		result.type = OBS_SOURCE_TYPE_INPUT;
 		result.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW | OBS_SOURCE_INTERACTION;
+		result.icon_type = OBS_ICON_TYPE_COLOR;
 		result.get_name = [](void *) {
-			return "Instant Highlight Source Draw";
+			return obs_module_text("DrawSource.Name");
 		};
 		result.create = [](obs_data_t *settings, obs_source_t *source) -> void * {
 			return new DrawSource(settings, source);

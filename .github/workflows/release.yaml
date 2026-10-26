@@ -1,0 +1,179 @@
+name: Release
+run-name: ${{ inputs.tag || github.ref_name }} release 🛫
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release (for example 2.1.0)
+        required: true
+        type: string
+      run_id:
+        description: Build workflow run id to take the artifacts from (defaults to the newest successful build of the tagged commit)
+        required: false
+        type: string
+permissions:
+  contents: write
+  actions: read
+jobs:
+  create-release:
+    name: Create Release 🛫
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check Release Tag ☑️
+        id: check
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          : Check Release Tag ☑️
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+          shopt -s extglob
+
+          # Accept an optional "v" or "v." prefix ahead of MAJOR.MINOR.PATCH.
+          case "${RELEASE_TAG}" in
+            @(v.|v|)+([0-9]).+([0-9]).+([0-9]) )
+              echo 'validTag=true' >> $GITHUB_OUTPUT
+              echo 'prerelease=false' >> $GITHUB_OUTPUT
+              ;;
+            @(v.|v|)+([0-9]).+([0-9]).+([0-9])-@(beta|rc)*([0-9]) )
+              echo 'validTag=true' >> $GITHUB_OUTPUT
+              echo 'prerelease=true' >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "::notice::'${RELEASE_TAG}' is not a release tag (MAJOR.MINOR.PATCH[-beta|-rc]); nothing to do."
+              echo 'validTag=false' >> $GITHUB_OUTPUT
+              ;;
+          esac
+          echo "version=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+        if: fromJSON(steps.check.outputs.validTag)
+        with:
+          ref: ${{ steps.check.outputs.version }}
+          fetch-depth: 0
+
+      - name: Find Build Run 🔎
+        id: find
+        if: fromJSON(steps.check.outputs.validTag)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          : Find Build Run 🔎
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+
+          # Tags are never rebuilt: the release reuses the artifacts of a
+          # successful manual Build run, preferring one made from the tagged commit.
+          tagged_commit="$(git rev-parse HEAD)"
+          plugin_name="$(jq -r '.name' buildspec.json)"
+          plugin_version="$(jq -r '.version' buildspec.json)"
+
+          run_id="${REQUESTED_RUN_ID}"
+          if [[ -z "${run_id}" ]]; then
+            run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow build.yaml \
+              --status success --commit "${tagged_commit}" --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty')"
+          fi
+          if [[ -z "${run_id}" ]]; then
+            echo "::warning::No successful Build run exists for ${tagged_commit}; using the newest successful Build run instead."
+            run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow build.yaml \
+              --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          fi
+          if [[ -z "${run_id}" ]]; then
+            echo "::error::No successful Build workflow run found. Run the Build workflow (Actions > Build > Run workflow) first, then push the tag again or dispatch this workflow with its run id."
+            exit 1
+          fi
+
+          run_commit="$(gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json headSha --jq '.headSha')"
+          echo "Using Build run ${run_id} (commit ${run_commit}) for tag ${{ steps.check.outputs.version }}"
+          if [[ "${run_commit}" != "${tagged_commit}" ]]; then
+            echo "::warning::Build run ${run_id} was built from ${run_commit}, not from the tagged commit ${tagged_commit}."
+          fi
+
+          echo "runId=${run_id}" >> $GITHUB_OUTPUT
+          echo "pluginName=${plugin_name}" >> $GITHUB_OUTPUT
+          echo "pluginVersion=${plugin_version}" >> $GITHUB_OUTPUT
+
+      - name: Download Build Artifacts 📥
+        uses: actions/download-artifact@v4
+        if: fromJSON(steps.check.outputs.validTag)
+        with:
+          run-id: ${{ steps.find.outputs.runId }}
+          github-token: ${{ github.token }}
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Collect Files 🏷️
+        if: fromJSON(steps.check.outputs.validTag)
+        env:
+          PLUGIN_VERSION: ${{ steps.find.outputs.pluginVersion }}
+          RELEASE_TAG: ${{ steps.check.outputs.version }}
+        run: |
+          : Collect Files 🏷️
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+          shopt -s extglob
+          shopt -s nullglob
+
+          mkdir -p "${GITHUB_WORKSPACE}/release"
+
+          variants=(
+            'windows-x64;zip|exe'
+            'macos-universal;tar.xz|pkg'
+            'ubuntu-24.04-x86_64;tar.xz|deb|ddeb'
+            'sources;tar.xz'
+          )
+
+          found=0
+          for variant_data in "${variants[@]}"; do
+            IFS=';' read -r variant suffix <<< "${variant_data}"
+            for candidate in "${GITHUB_WORKSPACE}"/artifacts/*-${variant}-*/@(*|*-dbgsym).@(${suffix}); do
+              mv "${candidate}" "${GITHUB_WORKSPACE}/release/"
+              found=$(( found + 1 ))
+            done
+          done
+
+          if (( ! found )); then
+            echo "::error::The Build run produced no release files."
+            exit 1
+          fi
+
+          if [[ "${RELEASE_TAG#v}" != "${PLUGIN_VERSION}" && "${RELEASE_TAG#v.}" != "${PLUGIN_VERSION}" ]]; then
+            echo "::warning::Tag ${RELEASE_TAG} does not match buildspec.json version ${PLUGIN_VERSION}."
+          fi
+
+          ls -l "${GITHUB_WORKSPACE}/release"
+
+      - name: Generate Checksums 🪪
+        if: fromJSON(steps.check.outputs.validTag)
+        run: |
+          : Generate Checksums 🪪
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+          shopt -s extglob
+          shopt -s nullglob
+
+          echo "### Checksums" > ${{ github.workspace }}/CHECKSUMS.txt
+          for file in ${{ github.workspace }}/release/@(*.exe|*.deb|*.ddeb|*.pkg|*.tar.xz|*.zip); do
+            echo "    ${file##*/}: $(sha256sum "${file}" | cut -d " " -f 1)" >> ${{ github.workspace }}/CHECKSUMS.txt
+          done
+
+      - name: Create Release 🛫
+        if: fromJSON(steps.check.outputs.validTag)
+        id: create_release
+        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564
+        with:
+          draft: true
+          prerelease: ${{ fromJSON(steps.check.outputs.prerelease) }}
+          tag_name: ${{ steps.check.outputs.version }}
+          name: ${{ steps.find.outputs.pluginName }} ${{ steps.check.outputs.version }}
+          body_path: ${{ github.workspace }}/CHECKSUMS.txt
+          files: |
+            ${{ github.workspace }}/release/*.exe
+            ${{ github.workspace }}/release/*.zip
+            ${{ github.workspace }}/release/*.pkg
+            ${{ github.workspace }}/release/*.deb
+            ${{ github.workspace }}/release/*.ddeb
+            ${{ github.workspace }}/release/*.tar.xz

@@ -4,13 +4,35 @@
 #include <QImage>
 #include <QPainterPath>
 #include <QPointF>
+#include <QPolygonF>
 #include <cstdint>
 #include <deque>
+#include <random>
 
 namespace drawsrc {
 
-// Preserve tool values used in saved OBS settings.
-enum class Tool : int { Square = 0, Circle = 1, Arrow = 2, Heart = 3, Eraser = 4, Pen = 5 };
+// Tool values are persisted in OBS scene collections; never renumber them.
+enum class Tool : int {
+	Square = 0,
+	Circle = 1,
+	Arrow = 2,
+	Heart = 3,
+	Eraser = 4,
+	Pen = 5,
+	Line = 6,
+	Highlighter = 7,
+	Spray = 8,
+	Triangle = 9,
+	Star = 10,
+};
+
+constexpr int kToolMax = int(Tool::Star);
+
+// Freehand tools follow the pointer path; the others stretch between two corners.
+constexpr bool tool_is_freehand(Tool tool)
+{
+	return tool == Tool::Pen || tool == Tool::Eraser || tool == Tool::Highlighter || tool == Tool::Spray;
+}
 
 class DrawingDocument {
 public:
@@ -32,6 +54,8 @@ private:
 	struct Action {
 		Tool tool = Tool::Pen;
 		QPainterPath path;
+		// Spray deposits are stored explicitly so undo/redo replays are deterministic.
+		QPolygonF dots;
 		QPointF start;
 		QPointF end;
 		QColor color;
@@ -43,6 +67,7 @@ private:
 	static void paint(QImage &image, const Action &action, uint64_t now);
 	static QPainterPath pathFor(const Action &action);
 	void append(Action action);
+	void spray(QPointF from, QPointF to, int count);
 	QPointF bounded(QPointF point) const;
 	QSize size_{1280, 720};
 	QImage base_;
@@ -55,6 +80,7 @@ private:
 	std::deque<Action> actions_;
 	std::deque<Action> redo_;
 	Action preview_;
+	std::mt19937 rng_{0x5eed1234u};
 	bool drawing_ = false;
 	bool dirty_ = true;
 	// Whether the previous frame had a fading action still animating; used to

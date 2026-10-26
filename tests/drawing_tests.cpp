@@ -20,6 +20,17 @@ static void stroke(DrawingDocument &doc, Tool tool, QPointF start, QPointF end, 
 	doc.end(1000000000);
 }
 
+static int visible_pixels(const QImage &image, QRect area = QRect())
+{
+	if (area.isNull())
+		area = image.rect();
+	int visible = 0;
+	for (int y = area.top(); y <= area.bottom(); ++y)
+		for (int x = area.left(); x <= area.right(); ++x)
+			visible += image.pixelColor(x, y).alpha() > 0;
+	return visible;
+}
+
 int main()
 {
 	DrawingDocument doc;
@@ -46,6 +57,18 @@ int main()
 	doc.image(2000000000);
 	require(doc.revision() == revision, "Unchanged persistent ink must use the cache");
 
+	DrawingDocument idle;
+	idle.resize({100, 100});
+	idle.begin({10, 50}, Tool::Pen, 6, Qt::red, 0);
+	idle.move({50, 50});
+	idle.image(1000000000);
+	const auto held = idle.revision();
+	idle.image(1100000000);
+	require(idle.revision() == held, "A stroke held still must not recomposite every frame");
+	idle.move({90, 50});
+	idle.image(1200000000);
+	require(idle.revision() > held, "Pointer movement must refresh the live stroke");
+
 	DrawingDocument alpha;
 	alpha.resize({100, 100});
 	alpha.begin({10, 50}, Tool::Pen, 12, QColor(255, 0, 0, 128), 0);
@@ -62,17 +85,41 @@ int main()
 	require(fade.image(1500000000).pixelColor(50, 50).alpha() >= 127, "Fade midpoint must retain half opacity");
 	require(fade.image(2000000000).pixelColor(50, 50).alpha() == 0, "Expired ink must disappear");
 
-	for (Tool tool : {Tool::Square, Tool::Circle, Tool::Arrow, Tool::Heart}) {
+	for (Tool tool :
+	     {Tool::Square, Tool::Circle, Tool::Arrow, Tool::Heart, Tool::Line, Tool::Triangle, Tool::Star}) {
 		DrawingDocument shape;
 		shape.resize({100, 100});
 		stroke(shape, tool, {10, 10}, {90, 90});
-		const QImage image = shape.image(1000000000);
-		int visible = 0;
-		for (int y = 0; y < image.height(); ++y)
-			for (int x = 0; x < image.width(); ++x)
-				visible += image.pixelColor(x, y).alpha() > 0;
-		require(visible > 100, "Every shape tool must produce visible ink");
+		require(visible_pixels(shape.image(1000000000)) > 100, "Every shape tool must produce visible ink");
 	}
+
+	DrawingDocument line;
+	line.resize({100, 100});
+	stroke(line, Tool::Line, {10, 50}, {90, 50}, 4);
+	const auto lineImage = line.image(1000000000);
+	require(lineImage.pixelColor(50, 50).alpha() == 255, "Line must connect its end points");
+	require(lineImage.pixelColor(90, 40).alpha() == 0, "Line must not grow an arrow head");
+
+	DrawingDocument marker;
+	marker.resize({100, 100});
+	stroke(marker, Tool::Highlighter, {10, 50}, {90, 50}, 4, Qt::yellow);
+	const int markerAlpha = marker.image(1000000000).pixelColor(50, 50).alpha();
+	require(markerAlpha > 90 && markerAlpha < 140, "Highlighter must be translucent");
+	require(marker.image(1000000000).pixelColor(50, 45).alpha() == markerAlpha,
+		"Highlighter must be wider than the requested pen size");
+
+	DrawingDocument spray;
+	spray.resize({120, 120});
+	stroke(spray, Tool::Spray, {60, 60}, {70, 60}, 8, Qt::blue);
+	const auto sprayed = spray.image(1000000000);
+	require(visible_pixels(sprayed, QRect(40, 40, 50, 40)) > 10, "Spray must deposit dots around the pointer");
+	require(visible_pixels(sprayed, QRect(0, 0, 25, 25)) == 0, "Spray must stay within its radius");
+	spray.undo();
+	require(visible_pixels(spray.image(1000000000)) == 0, "Spray must be undoable");
+	spray.redo();
+	require(visible_pixels(spray.image(1000000000), QRect(40, 40, 50, 40)) > 10,
+		"Redo must replay the identical spray pattern");
+
 	DrawingDocument history;
 	history.resize({100, 100});
 	for (int i = 0; i < 140; ++i)

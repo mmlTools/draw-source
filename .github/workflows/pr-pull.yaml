@@ -1,7 +1,6 @@
 name: Pull Request
 run-name: ${{ github.event.pull_request.title }} pull request run 🚀
 on:
-  workflow_dispatch:
   pull_request:
     paths-ignore:
       - '**.md'
@@ -25,3 +24,6 @@ jobs:
     secrets: inherit
     permissions:
       contents: read
+    with:
+      config: RelWithDebInfo
+      package: false
